@@ -198,14 +198,18 @@ String _friendlyError(Object error) {
   return 'Tidak bisa menghubungi backend di $host. Apakah sudah dijalankan?';
 }
 
-/// Pesan untuk status non-200. 401 dan 503 dipisahkan karena keduanya hampir
-/// selalu soal konfigurasi kunci, bukan soal jaringan — tanpa ini pengguna hanya
-/// melihat "HTTP 401" dan menduga backend mati.
+/// Pesan untuk status non-200. 401, 429 dan 503 dipisahkan karena ketiganya
+/// hampir selalu soal konfigurasi kunci atau batas laju, bukan soal jaringan —
+/// tanpa ini pengguna hanya melihat "HTTP 401" dan menduga backend mati.
 String _httpErrorMessage(int statusCode, String path) {
   if (statusCode == 401) {
     return kApiKey.isEmpty
         ? 'Ditolak (401): aplikasi dibuild tanpa --dart-define=API_KEY.'
         : 'Ditolak (401): API key aplikasi tidak sama dengan env var API_KEY di server.';
+  }
+  if (statusCode == 429) {
+    return 'Dibatasi lajunya (429): permintaan terlalu sering untuk API key ini. '
+        'Tunggu sebentar lalu coba lagi.';
   }
   if (statusCode == 503) {
     return 'Backend belum siap (503): env var API_KEY belum diset di server, atau '

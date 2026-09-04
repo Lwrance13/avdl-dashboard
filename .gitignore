@@ -43,3 +43,18 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# --- Project-specific hardening -------------------------------------------- #
+# The release APK has the API key baked in at build time via --dart-define, so a
+# committed binary would publish that key. /build/ above already covers the normal
+# output path; these patterns also catch a build redirected with --output-dir or an
+# APK copied somewhere else to be shared.
+*.apk
+*.aab
+*.apks
+
+# Never commit key material. The app reads API_KEY and BASE_URL from
+# --dart-define, so nothing here should need a .env — this is a backstop.
+.env
+.env.*
+!.env.example
