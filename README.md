@@ -48,6 +48,51 @@ APK-nya. `--dart-define` menjauhkan kunci dari source code dan git, bukan dari
 pembongkaran APK. Memadai untuk prototipe penelitian di LAN, bukan pengganti
 autentikasi per pengguna.
 
+## Dua API key: admin dan reviewer
+
+Backend menerima **dua kunci** yang sama-sama sah di header `X-API-Key`:
+
+| Kunci | Env var di backend | Rate limit |
+|-------|--------------------|------------|
+| Admin | `API_KEY` | tidak ada |
+| Reviewer | `REVIEWER_API_KEY` | hanya `POST /predict`, `REVIEWER_RATE_LIMIT` per 60 detik (default 60) |
+
+Keduanya punya akses yang sama ke seluruh endpoint. Tidak ada endpoint yang
+mengubah data, jadi "read-only" di sini bukan berarti kemampuannya lebih sedikit —
+gunanya supaya kunci reviewer bisa dibagikan, lalu dicabut, tanpa menyentuh kunci
+yang dipakai APK utama.
+
+**Aplikasi tidak perlu diubah sama sekali.** `lib/main.dart` hanya mengirim nilai
+`--dart-define=API_KEY` apa pun isinya; yang menentukan perannya adalah nilai mana
+yang cocok di sisi server. Jadi APK untuk reviewer dibangun dengan perintah yang
+sama, cukup ganti nilainya:
+
+```bash
+flutter build apk --release \
+  --dart-define=API_KEY=<kunci-reviewer> \
+  --dart-define=BASE_URL=https://avdl-backend-production.up.railway.app
+# hasil: build/app/outputs/flutter-apk/app-release.apk
+```
+
+`BASE_URL` **wajib** diisi di sini, karena defaultnya masih alamat LAN lama
+(`http://192.168.1.6:8000`) yang tidak bisa dijangkau reviewer.
+
+Untuk memastikan servernya sudah dikonfigurasi sebelum membangun APK, cukup buka
+`/health` — endpoint itu tidak butuh kunci dan melaporkan `reviewer_key_configured`
+serta `reviewer_rate_limit_per_min`:
+
+```bash
+curl -s https://avdl-backend-production.up.railway.app/health
+```
+
+Kalau `reviewer_key_configured` masih `false`, `REVIEWER_API_KEY` belum diset di
+dashboard hosting dan kunci reviewer akan ditolak 401.
+
+Kalau batas laju terlampaui, backend menjawab **429** beserta header `Retry-After`
+dan aplikasi menampilkan "Dibatasi lajunya (429)…" — bukan error jaringan. Kunci
+admin tidak pernah dibatasi, jadi pengujian dengan kunci admin tidak akan pernah
+memunculkan pesan itu.
+
 ## Konfigurasi Android yang sudah terpasang
 
 `android/app/src/main/AndroidManifest.xml` sudah memuat keduanya — jangan dihapus:
@@ -62,8 +107,9 @@ autentikasi per pengguna.
 | Yang terlihat | Penyebab |
 |---------------|----------|
 | Banner "API key belum disuntikkan" | build tanpa `--dart-define=API_KEY` |
-| "Ditolak (401): API key aplikasi tidak sama…" | nilai define ≠ env var `API_KEY` di backend |
-| "Backend belum siap (503)…" | `API_KEY` belum diset di backend, atau artefak model gagal dimuat |
+| "Ditolak (401): API key aplikasi tidak sama…" | nilai define tidak cocok dengan `API_KEY` maupun `REVIEWER_API_KEY` di backend |
+| "Dibatasi lajunya (429)…" | kunci reviewer melewati batas `POST /predict`; tunggu lalu coba lagi |
+| "Backend belum siap (503)…" | `API_KEY` **dan** `REVIEWER_API_KEY` sama-sama belum diset di backend, atau artefak model gagal dimuat |
 | "Tidak bisa menghubungi backend di …" | backend mati, beda Wi-Fi, atau `BASE_URL` salah |
 | Banner memuat "server: API_KEY belum diset" | `GET /health` melaporkan backend belum dikonfigurasi |
 
