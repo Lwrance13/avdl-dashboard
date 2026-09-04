@@ -1280,6 +1280,7 @@ class HBarChart extends StatelessWidget {
     this.barColor,
     this.barHeight = 10,
     this.valueFormatter,
+    this.maxValue,
   });
 
   final List<(String, double)> rows;
@@ -1287,14 +1288,22 @@ class HBarChart extends StatelessWidget {
   final double barHeight;
   final String Function(double)? valueFormatter;
 
+  /// Batas atas skala batang. Kalau null, dipakai nilai terbesar pada `rows`,
+  /// sehingga item terbesar mengisi penuh — benar untuk perbandingan peringkat.
+  /// Isi ini kalau nilainya adalah **bagian dari keseluruhan yang diketahui**:
+  /// batang penuh untuk 12,32% akan terbaca seolah 12,32% itu totalnya.
+  final double? maxValue;
+
   @override
   Widget build(BuildContext context) {
     final Viz viz = Viz.of(context);
     final Color fill = barColor ?? viz.series1;
-    final double max = rows.fold<double>(
-      0,
-      (double acc, (String, double) r) => math.max(acc, r.$2),
-    );
+    final double max =
+        maxValue ??
+        rows.fold<double>(
+          0,
+          (double acc, (String, double) r) => math.max(acc, r.$2),
+        );
     final String Function(double) fmt =
         valueFormatter ?? (double v) => _thousands(v.round());
 
@@ -2034,8 +2043,8 @@ class _CountsTabState extends State<CountsTab> {
         padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, 32),
         children: <Widget>[
           Text(
-            'Diagregasi dari ${_thousands(stats.nIntervals)} interval split uji '
-            '${multi ? 'di ${stats.perLocation.length} lokasi' : ''}'
+            'Diagregasi dari ${_thousands(stats.nIntervals)} interval split uji'
+            '${multi ? ' di ${stats.perLocation.length} lokasi' : ''}'
             '. Bukan statistik seluruh dataset.',
             style: TextStyle(
               fontSize: 12.5,
@@ -2459,6 +2468,13 @@ class _ShapTabState extends State<ShapTab> {
     if (_error != null) return StateBlock.error(_error!, onRetry: _load);
     if (_shap == null) return const StateBlock.loading();
     final ShapInfo shap = _shap!;
+    // Kelima nilai ini adalah bagian dari 100%, jadi skalanya tidak boleh
+    // mengikuti nilai terbesar — dibulatkan ke atas ke kelipatan 5 terdekat.
+    double shapPeak = 0;
+    for (final ({String feature, double pct}) f in shap.features) {
+      shapPeak = math.max(shapPeak, f.pct);
+    }
+    final double shapScaleMax = math.max(5, (shapPeak / 5).ceil() * 5.0);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -2479,7 +2495,10 @@ class _ShapTabState extends State<ShapTab> {
           const SizedBox(height: Gap.lg),
           SectionCard(
             title: 'Lima fitur teratas',
-            subtitle: 'Kontribusi masing-masing terhadap total mean |SHAP|.',
+            subtitle:
+                'Kontribusi masing-masing terhadap total mean |SHAP|. '
+                'Skala batang 0–${shapScaleMax.round()}%, bukan 0–maks, supaya '
+                'batang penuh tidak terbaca sebagai "seluruhnya".',
             trailing: TableToggle(
               showTable: _table,
               onChanged: (bool next) => setState(() => _table = next),
@@ -2506,6 +2525,7 @@ class _ShapTabState extends State<ShapTab> {
                         (f.feature, f.pct),
                     ],
                     valueFormatter: (double v) => '${v.toStringAsFixed(2)}%',
+                    maxValue: shapScaleMax,
                   ),
           ),
           if (shap.note.isNotEmpty) ...<Widget>[
