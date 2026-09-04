@@ -1,10 +1,43 @@
 # avdl_dashboard
 
-Prototipe APK satu layar untuk penelitian AVDL: menampilkan interval uji dari
+Prototipe APK untuk penelitian AVDL: membaca interval uji dari
 `backend/phase5_test_labeled.csv` dan meminta prediksi kepadatan (low / medium /
 high) dari Random Forest lewat `backend/main.py`.
 
-Seluruh logika ada di `lib/main.dart`.
+Empat tab, seluruhnya di `lib/main.dart`:
+
+| Tab | Isi | Endpoint |
+|-----|-----|----------|
+| **Prediksi** | Daftar interval uji; ketuk satu baris untuk memprediksi kelas interval berikutnya, lengkap dengan tiga probabilitas | `/samples`, `/predict` |
+| **Jumlah** | Total per kelas kendaraan, plus perbandingan antar lokasi kamera | `/stats/counts` |
+| **Tren** | Jumlah per kelas terhadap waktu untuk satu lokasi | `/stats/trend` |
+| **SHAP** | Lima fitur teratas dan pembagian sinyal-lalin vs bookkeeping | `/shap/top-features` |
+
+Filter lokasi ada satu, di atas semua tab. Tab Tren tidak menerima "Semua lokasi"
+karena `/stats/trend` mewajibkan satu lokasi konkret.
+
+## Catatan tentang isi grafik
+
+- **Angkanya adalah split uji, bukan seluruh dataset.** Sumbernya 314 interval di
+  5 lokasi (Gaitenis tidak punya episode valid). Jangan sebut sebagai statistik
+  keseluruhan dataset.
+- **Tab Jumlah dan Tren memakai small multiples**, satu panel per kelas dengan
+  skala sendiri — bukan satu grafik berisi enam seri. Alasannya bentuk datanya:
+  Vehicles 3.417 sementara Scooters 1, jadi enam seri pada satu sumbu akan
+  membuat lima di antaranya tak terlihat.
+- **Garis tren sengaja terputus di batas episode.** Rekaman AVDL terputus-putus;
+  satu lokasi bisa memuat beberapa episode berjarak berjam-jam. Menyambungnya
+  akan menyiratkan kontinuitas yang tidak ada.
+- **Kelas kepadatan memakai ramp biru satu warna** (low terang → high gelap; di
+  mode gelap terbalik, makin padat makin terang), bukan hijau/kuning/merah.
+  Alasannya terukur: pada skema lampu-lalin hijau vs kuning hanya berjarak CVD
+  ΔE 3,0 di protanopia terhadap ambang 8, sehingga pembaca buta warna
+  merah-hijau tidak bisa memisahkan low dari medium. Nama kelasnya selalu
+  ditulis di sebelah warnanya.
+- Karena itu **benar/salah ditandai ikon + teks**, bukan hijau/merah — supaya
+  tidak ada dua sistem warna yang bersaing di satu layar.
+- Setiap grafik punya **kembaran tabel** di tombol kanan-atas kartu, jadi tidak
+  ada nilai yang hanya bisa dibaca lewat warna atau sentuhan.
 
 ## Prasyarat
 
