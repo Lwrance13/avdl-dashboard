@@ -18,6 +18,22 @@ karena `/stats/trend` mewajibkan satu lokasi konkret.
 
 ## Catatan tentang isi grafik
 
+- **Dua label, jangan tertukar.** Model memprediksi kelas interval **berikutnya**
+  (`target_mode='next_interval'`), jadi kunci jawaban sebuah prediksi ada di baris
+  lain. Chip pada setiap baris daftar = kelas interval itu sendiri
+  (`observed_label`); yang dibandingkan dengan prediksi adalah `target_label`,
+  kelas interval t+1, yang tampil sebagai "Aktual t+1" di panel. Sampai
+  5 Sep 2026 backend mengirim label interval t sebagai `true_label`, sehingga
+  penanda Benar/Salah bergeser satu interval — 82 dari 306 baris berstatus salah.
+  Panel juga menampilkan jarak nyata t → t+1, karena bin 5 menit yang kosong tidak
+  pernah jadi baris: 80,1% berjarak 5 menit, sisanya sampai 60 menit.
+- **Interval terakhir sebuah episode tidak punya t+1**, jadi 8 dari 314 baris tidak
+  bisa dinilai benar/salah dan panel mengatakannya, bukan menganggapnya salah.
+- **Baris di luar 267 sequence yang dievaluasi paper ditandai.** Aplikasi
+  menyajikan seluruh 314 interval, sementara perbandingan model di naskah memakai
+  267 yang riwayatnya genap 6 interval dan punya t+1. Di 39 baris bertarget dengan
+  riwayat belum genap, akurasinya 0,564 melawan 0,730 — model tidak pernah dilatih
+  pada baris seperti itu.
 - **Angkanya adalah split uji, bukan seluruh dataset.** Sumbernya 314 interval di
   5 lokasi (Gaitenis tidak punya episode valid). Jangan sebut sebagai statistik
   keseluruhan dataset.
@@ -118,8 +134,7 @@ serta `reviewer_rate_limit_per_min`:
 curl -s https://avdl-backend-production.up.railway.app/health
 ```
 
-Kalau `reviewer_key_configured` masih `false`, `REVIEWER_API_KEY` belum diset di
-dashboard hosting dan kunci reviewer akan ditolak 401.
+Konfigurasi server produksi Railway saat ini telah aktif dengan `reviewer_key_configured: true` (terverifikasi via `/health`), sehingga kunci reviewer dapat langsung digunakan untuk pengujian endpoint maupun kompilasi APK reviewer.
 
 Kalau batas laju terlampaui, backend menjawab **429** beserta header `Retry-After`
 dan aplikasi menampilkan "Dibatasi lajunya (429)…" — bukan error jaringan. Kunci
@@ -131,9 +146,12 @@ memunculkan pesan itu.
 `android/app/src/main/AndroidManifest.xml` sudah memuat keduanya — jangan dihapus:
 
 - `<uses-permission android:name="android.permission.INTERNET"/>` (baris 2)
-- `android:usesCleartextTraffic="true"` pada `<application>` (baris 7), karena
-  backend LAN memakai HTTP polos dan Android 9+ memblokirnya secara default.
-  Setelah backend pindah ke HTTPS, atribut ini bisa dihapus.
+- `android:usesCleartextTraffic="true"` pada `<application>` (baris 7). **Build
+  release sudah menunjuk domain Railway lewat HTTPS dan tidak lagi
+  membutuhkannya**; atribut ini tinggal untuk build debug ke backend LAN, yang
+  masih HTTP polos dan diblokir Android 9+ secara default. Karena masih terpasang,
+  ini dicatat sebagai limitasi eksplisit di §5 naskah — jangan dihapus dari sana
+  tanpa menghapus atributnya juga.
 
 ## Kalau layar data kosong
 

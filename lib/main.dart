@@ -200,16 +200,54 @@ class Sample {
 }
 
 /// Hasil POST /predict.
+///
+/// Ada **dua** label di respons dan keduanya tidak boleh tertukar. Model adalah
+/// prediktor interval berikutnya (`target_mode='next_interval'`), jadi ground
+/// truth sebuah prediksi ada di baris *lain*:
+///
+/// * [observedLabel] — kelas kepadatan interval yang fiturnya dipakai (t).
+///   Ini yang tampil di chip header daftar. **Bukan** kunci jawaban.
+/// * [targetLabel] — kelas kepadatan interval t+1, dan inilah kunci jawabannya.
+///
+/// Sebelum 5 Sep 2026 backend mengirim label interval t sebagai `true_label`,
+/// sehingga penanda Benar/Salah di layar ini bergeser satu interval.
 class Prediction {
   const Prediction({
     required this.predictedLabel,
     required this.probabilities,
     required this.trueLabel,
+    this.observedLabel,
+    this.intervalStart,
+    this.targetIntervalStart,
+    this.targetGapMin,
+    this.inEvaluationWindow,
+    this.serverCorrect,
   });
 
   final String predictedLabel;
   final Map<String, double> probabilities;
+
+  /// Ground truth prediksi = kelas interval t+1. Null di interval terakhir
+  /// sebuah episode, yang memang tidak punya t+1.
   final String? trueLabel;
+
+  /// Kelas kepadatan interval t itu sendiri, untuk konteks.
+  final String? observedLabel;
+
+  final String? intervalStart;
+  final String? targetIntervalStart;
+
+  /// Jarak nyata t -> t+1 dalam menit. 5 di 80,1% baris terevaluasi, tapi bisa
+  /// sampai 60: bin 5 menit yang kosong tidak pernah jadi baris.
+  final double? targetGapMin;
+
+  /// True kalau baris ini salah satu dari 267 sequence yang dievaluasi di naskah.
+  final bool? inEvaluationWindow;
+
+  final bool? serverCorrect;
+
+  /// Alias yang lebih jelas untuk [trueLabel].
+  String? get targetLabel => trueLabel;
 
   factory Prediction.fromJson(Map<String, dynamic> json) {
     final Map<String, double> probs = <String, double>{};
@@ -219,16 +257,32 @@ class Prediction {
         if (value is num) probs[key.toString()] = value.toDouble();
       });
     }
-    final Object? label = json['true_label'] ?? json['density_label'];
+    // Utamakan `target_label`; `true_label` adalah aliasnya dan `density_label`
+    // hanya jalur mundur untuk respons lama.
+    final Object? target =
+        json['target_label'] ?? json['true_label'] ?? json['density_label'];
+    final Object? gap = json['target_gap_min'];
+    final Object? correct = json['correct'];
+    final Object? inWindow = json['in_evaluation_window'];
     return Prediction(
       predictedLabel: (json['predicted_label'] ?? '?').toString(),
       probabilities: probs,
-      trueLabel: label?.toString(),
+      trueLabel: target?.toString(),
+      observedLabel: json['observed_label']?.toString(),
+      intervalStart: json['interval_start']?.toString(),
+      targetIntervalStart: json['target_interval_start']?.toString(),
+      targetGapMin: gap is num ? gap.toDouble() : null,
+      inEvaluationWindow: inWindow is bool ? inWindow : null,
+      serverCorrect: correct is bool ? correct : null,
     );
   }
 
-  /// Benar hanya kalau kedua label ada dan sama. Null = tidak bisa dinilai.
+  /// Benar/salah. Pakai putusan server kalau ada — server yang tahu baris mana
+  /// yang jadi target — dan hitung sendiri hanya sebagai jalur mundur. Null =
+  /// tidak bisa dinilai, dan pemanggil wajib menghormati itu, bukan
+  /// menganggapnya salah.
   bool? get isCorrect {
+    if (serverCorrect != null) return serverCorrect;
     if (trueLabel == null || trueLabel!.isEmpty) return null;
     return trueLabel!.toLowerCase() == predictedLabel.toLowerCase();
   }
@@ -1658,7 +1712,8 @@ class _PredictTabState extends State<PredictTab> {
               padding: const EdgeInsets.only(bottom: Gap.sm),
               child: Text(
                 '${_samples!.length} interval uji — ketuk satu baris untuk memprediksi '
-                'kelas kepadatan interval berikutnya.',
+                'kelas kepadatan interval berikutnya. Chip di setiap baris adalah '
+                'kelas interval itu sendiri, bukan kunci jawaban prediksi.',
                 style: TextStyle(
                   fontSize: 12.5,
                   height: 1.4,
@@ -1809,6 +1864,11 @@ class _SampleRow extends StatelessWidget {
 /// apa pun, dan menambahkan sistem warna kedua (status) di sebelah ramp
 /// kepadatan akan membuat dua makna bersaing pada palet yang sama.
 /// Ketiga probabilitas selalu ditampilkan; yang tertinggi diberi label langsung.
+///
+/// Panel ini sengaja menampilkan **dua** label: kelas interval t+1 (kunci
+/// jawaban, dibandingkan dengan prediksi) dan kelas interval yang dibuka
+/// sendiri. Tanpa keduanya, layar ini tampak membandingkan prediksi dengan label
+/// interval yang salah — persis kekeliruan yang diperbaiki 5 Sep 2026.
 class _PredictionPanel extends StatelessWidget {
   const _PredictionPanel({required this.prediction});
 
@@ -1823,6 +1883,10 @@ class _PredictionPanel extends StatelessWidget {
       ...order.where(prediction.probabilities.containsKey),
       ...prediction.probabilities.keys.where((String k) => !order.contains(k)),
     ];
+    final String? target = prediction.targetLabel;
+    final String? gapNote = prediction.targetGapMin == null
+        ? null
+        : '+${_trimZero(prediction.targetGapMin!)} mnt';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1830,7 +1894,7 @@ class _PredictionPanel extends StatelessWidget {
         Row(
           children: <Widget>[
             Text(
-              'Prediksi',
+              'Prediksi t+1',
               style: TextStyle(fontSize: 11.5, color: viz.inkMuted),
             ),
             const SizedBox(width: Gap.sm),
@@ -1859,18 +1923,37 @@ class _PredictionPanel extends StatelessWidget {
               ),
           ],
         ),
-        if (prediction.trueLabel != null &&
-            prediction.trueLabel!.isNotEmpty) ...<Widget>[
+        if (target != null && target.isNotEmpty) ...<Widget>[
           const SizedBox(height: Gap.sm),
-          Row(
-            children: <Widget>[
-              Text(
-                'Label sebenarnya',
-                style: TextStyle(fontSize: 11.5, color: viz.inkMuted),
-              ),
-              const SizedBox(width: Gap.sm),
-              DensityChip(label: prediction.trueLabel, dense: true),
-            ],
+          _PanelLabelRow(
+            caption: prediction.targetIntervalStart == null
+                ? 'Aktual t+1'
+                : 'Aktual t+1 · ${_shortTime(prediction.targetIntervalStart!)}',
+            label: target,
+            trailing: gapNote,
+          ),
+        ] else ...<Widget>[
+          const SizedBox(height: Gap.sm),
+          Text(
+            'Interval terakhir episode — tidak ada t+1, jadi prediksi ini tidak '
+            'bisa dinilai benar atau salah.',
+            style: TextStyle(fontSize: 11.5, color: viz.inkSecondary),
+          ),
+        ],
+        if (prediction.observedLabel != null &&
+            prediction.observedLabel!.isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.xs),
+          _PanelLabelRow(
+            caption: 'Interval ini (t)',
+            label: prediction.observedLabel,
+          ),
+        ],
+        if (prediction.inEvaluationWindow == false) ...<Widget>[
+          const SizedBox(height: Gap.sm),
+          Text(
+            'Di luar 267 sequence yang dievaluasi di paper: riwayatnya belum '
+            'genap 6 interval atau tidak punya t+1.',
+            style: TextStyle(fontSize: 11, color: viz.inkMuted),
           ),
         ],
         const SizedBox(height: Gap.lg),
@@ -1886,6 +1969,52 @@ class _PredictionPanel extends StatelessWidget {
             emphasised:
                 key.toLowerCase() == prediction.predictedLabel.toLowerCase(),
           ),
+      ],
+    );
+  }
+}
+
+/// "45.0" -> "45", "7.5" -> "7,5". Menit selalu bulat di data ini, tapi jangan
+/// diandalkan.
+String _trimZero(double value) {
+  if (value == value.roundToDouble()) return value.round().toString();
+  return value.toStringAsFixed(1).replaceFirst('.', ',');
+}
+
+/// Baris "keterangan — chip kepadatan", dipakai untuk kedua label di panel.
+class _PanelLabelRow extends StatelessWidget {
+  const _PanelLabelRow({
+    required this.caption,
+    required this.label,
+    this.trailing,
+  });
+
+  final String caption;
+  final String? label;
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final Viz viz = Viz.of(context);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            caption,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11.5, color: viz.inkMuted),
+          ),
+        ),
+        const SizedBox(width: Gap.sm),
+        DensityChip(label: label, dense: true),
+        if (trailing != null) ...<Widget>[
+          const SizedBox(width: Gap.sm),
+          Text(
+            trailing!,
+            style: TextStyle(fontSize: 11, color: viz.inkMuted),
+          ),
+        ],
       ],
     );
   }
